@@ -14,7 +14,7 @@ Load the `okf-reference` skill first if its model isn't already in context — t
 
 ### 1. Check for an existing config
 
-Look for `okf.config.json` at the project root (the working directory, not inside any bundle). If it already exists, show its contents and ask the user whether to abort or overwrite before doing anything else. Do not overwrite silently.
+Look for `okf.config.json` at the project root (the working directory, not inside any bundle). If it already exists, ask the user whether to abort, overwrite or move onto step 7. Do not overwrite silently.
 
 ### 2. Ask default vs. personalized
 
@@ -40,3 +40,19 @@ If `logging` was set to `file`, create an empty `log.md` at `bundleRoot`.
 ### 6. Report
 
 Report the `okf.config.json` path and the bundle root path that were created.
+
+### 7. Document usage for future agents
+
+Check which of `AGENTS.md` / `CLAUDE.md` exist at the project root.
+
+- If neither exists, ask the user (AskUserQuestion) whether to create one and add the snippet below, and which filename to use. Skip this step if they decline.
+- If one exists, ask (AskUserQuestion) whether to append the snippet to it. Skip if they decline.
+- If both exist, ask (AskUserQuestion, multi-select) which file(s) to append to — either, both, or skip.
+
+If not already present, append the following template as-is at the end of the chosen file(s), verbatim:
+
+```markdown
+## Project knowledge
+
+This project maintains an OKF knowledge bundle — check `bundleRoot` in `okf.config.json` for its location. At the start of a session, read `<bundleRoot>/fullIndex.md` if present, otherwise `<bundleRoot>/index.md`, for an overview of the project's documentation.
+```
