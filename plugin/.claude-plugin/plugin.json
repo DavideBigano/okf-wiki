@@ -1,0 +1,8 @@
+{
+  "name": "okf-wiki",
+  "description": "Skills for creating, reading, and linting OKF (Open Knowledge Format) knowledge bundles.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Davide Bigano"
+  }
+}

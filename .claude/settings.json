@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "git-helpers@personal-claude-marketplace": true,
+    "skillmancy@personal-claude-marketplace": true
+  }
+}
