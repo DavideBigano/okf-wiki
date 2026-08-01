@@ -2,7 +2,7 @@
 name: okf-lint
 description: Audit an OKF knowledge bundle (per okf.config.json) against the rules defined in okf-reference — frontmatter validity, link integrity, structural rules, index freshness — and report or fix violations. Use when the user asks to lint, audit, validate, or check an OKF bundle/wiki for compliance.
 allowed-tools: Read, Glob, Grep, Edit, AskUserQuestion
-argument-hint: "[--auto|--no-fix] [file-or-glob ...]"
+argument-hint: "[--auto|--no-fix] [--bundle name] [file-or-glob ...]"
 user-invocable: true
 skillmancy-version: "0.2.0"
 ---
@@ -23,39 +23,48 @@ skillmancy-version: "0.2.0"
 
 ## Task
 
-Load `okf-reference` first if not already in context — every rule checked here is defined there; never restate it.
+### 0. Setup
+
+Load `okf-reference`.
 
 ### 1. Read the config
 
-Read `okf.config.json` at the project root, not inside a bundle. Missing → stop, tell the user to run `okf-init`. Never guess `bundleRoot` or any other value.
+Read `okf.config.json` at the project root. Missing → stop, tell the user to run `okf-init`. For each entry in `bundles`, resolve it's configuration.
 
 ### 2. Resolve scope
 
-Check the invocation arguments for file paths or glob patterns (anything that isn't `--auto` or `--no-fix`):
-
-- **None given** — scope is the full bundle, walked from `bundleRoot`.
-- **One or more given** — resolve each (relative, absolute, or glob); scope is exactly the matched files. Ignore any argument that resolves to a directory — this mode targets files, not a subtree.
+With multiple bundles configured locate the one that matches the `--bundle` argument. Operate on that one. If a target cannot be determined, ask the user onto which bundle to operate.
 
 ### 3. Run the check catalog
 
-Against the resolved scope, cite the `okf-reference` rule each check enforces — never re-explain the rule, only report the violation:
+Check the bundle for the following:
 
-- **Frontmatter** — missing required `type`; missing a property listed in `requiredProperties`; a reserved filename (`index.md`, `log.md`, `.directory.md`) written as a concept.
-- **Links** — an internal link with no matching target; a link style that doesn't match `okf.config.json`'s `linkFormat`.
-- **Structural** — a directory nested past `maxBundleDepth`; a directory missing `.directory.md` when `directoryMd` is `true`; a reserved filename misused.
-- **Index freshness** — `index.md` or `fullIndex.md` entries stale, missing, or mislinked against the bundle's actual contents.
+- **Frontmatter** — missing required `type`; missing a property listed in the bundle's `requiredProperties`.
+- **Links** — an internal link with no matching target; a link style that doesn't match the bundle's `linkFormat`.
+- **Structural** — a directory nested past the bundle's `maxBundleDepth`; a directory missing `.directory.md` when the bundle's `directoryMd` is `true`; a reserved filename misused.
 
 ### 4. Report and resolve each finding
 
-Find a concrete, actionable fix unless none is obvious or the one found is weak.
+Find a concrete, actionable fixes unless none is obvious or the one found is weak.
 
 - **`--auto`** — apply each fix directly; report fix-less findings.
 - **`--no-fix`** — report only, apply nothing.
-- **neither (default, interactive)** — call `AskUserQuestion` per finding with exactly three options: apply the recommended fix, skip, or let the user supply their own fix (freeform).
+- **Neither** — display the findings following the provided template. Ask the user:
+  1. Apply all fixes
+  2. Walk through each finding 
+  3. Skip
+  If 2 is chosen, for each finding ask:
+  1. Apply the fix 
+  2. Skip
 
-Report format:
+Display template:
 
+```markdown
+<bundleRootRelativePathToFile>.md
+  **Issue**: declarative description of the finding, ~5 to ~15 words
+  **Recommended fix**: provided fix or "none found" if missing
 ```
-[type] path/to/file.md — concise, declarative description of the violation
-  recommended fix: <provided fix or "none" if missing>
-```
+
+### 5. Index regeneration
+
+Run the `genIndex` script. Do it even if no files changed.

@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
 // genIndex.js — OKF index generator (local extension, not part of OKF).
-// Regenerates a per-directory index.md across a bundle, and optionally a
-// recursive fullIndex. Config, link style, and full-index position come from
-// okf.config.json discovered upward from the working directory.
+// Regenerates a per-directory index.md across every configured bundle, and
+// optionally a single recursive fullIndex. Config comes from okf.config.json
+// discovered upward from the working directory; each bundle in its `bundles`
+// array is either defined inline (bundleRoot required there) or referenced by
+// path to a standalone bundle.config.json file, which lives at that bundle's
+// root — the directory containing it IS the bundle root.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,6 +43,20 @@ function findConfig(startDir) {
 // Every config path is a system path: absolute, or relative to the cwd.
 function resolveSystemPath(p) {
   return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
+}
+
+function readJson(filePath, label) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    fail(`cannot read ${label} at ${rel(filePath)}: ${err.message}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    fail(`${label} at ${rel(filePath)} is not valid JSON: ${err.message}`);
+  }
 }
 
 // Read and parse a file's YAML frontmatter. Structural problems are fatal: an
@@ -92,7 +109,7 @@ function listDir(dir, excludedFiles) {
 
 const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
 
-// --- config ----------------------------------------------------------------
+// --- config ------------------------------------------------------------
 
 const configPath = findConfig(process.cwd());
 if (!configPath) {
@@ -100,62 +117,85 @@ if (!configPath) {
   process.exit(1);
 }
 
-let config;
-try {
-  config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-} catch (err) {
-  console.error(`Could not read ${configPath}: ${err.message}`);
+const okfConfig = readJson(configPath, 'okf.config.json');
+
+if (!Array.isArray(okfConfig.bundles) || okfConfig.bundles.length === 0) {
+  console.error(`bundles (a non-empty array) is required in ${configPath}.`);
   process.exit(1);
 }
 
-if (!config.bundleRoot) {
-  console.error(`bundleRoot is required in ${configPath}.`);
-  process.exit(1);
+// Resolve each `bundles` entry into { bundleRoot, linkFormat, directoryMd }.
+// A string entry points to a standalone bundle.config.json; that file's own
+// directory is the bundle root. An inline object carries bundleRoot itself.
+function resolveBundle(entry) {
+  if (typeof entry === 'string') {
+    const bundleConfigPath = resolveSystemPath(entry);
+    const bundleConfig = readJson(bundleConfigPath, 'bundle.config.json');
+    if (!bundleConfig.linkFormat) fail(`linkFormat is required in ${rel(bundleConfigPath)}.`);
+    return {
+      bundleRoot: path.dirname(bundleConfigPath),
+      linkFormat: bundleConfig.linkFormat,
+      directoryMd: bundleConfig.directoryMd === true,
+    };
+  }
+  if (!entry || typeof entry !== 'object') {
+    fail(`each entry in "bundles" must be a path string or an object (got ${JSON.stringify(entry)}).`);
+  }
+  if (!entry.bundleRoot) fail(`bundleRoot is required for each inline bundle in ${configPath}.`);
+  if (!entry.linkFormat) fail(`linkFormat is required for each inline bundle in ${configPath}.`);
+  return {
+    bundleRoot: resolveSystemPath(entry.bundleRoot),
+    linkFormat: entry.linkFormat,
+    directoryMd: entry.directoryMd === true,
+  };
 }
 
-const bundleRoot = resolveSystemPath(config.bundleRoot);
-if (!fs.existsSync(bundleRoot) || !fs.statSync(bundleRoot).isDirectory()) {
-  console.error(`bundleRoot does not resolve to a directory: ${bundleRoot}`);
-  process.exit(1);
+const bundles = okfConfig.bundles.map(resolveBundle);
+
+for (const b of bundles) {
+  if (!fs.existsSync(b.bundleRoot) || !fs.statSync(b.bundleRoot).isDirectory()) {
+    console.error(`bundleRoot does not resolve to a directory: ${b.bundleRoot}`);
+    process.exit(1);
+  }
 }
 
-const linkFormat = config.linkFormat || 'rootRelative';
-const fullIndexPosition = config.fullIndexPosition || 'none';
-const directoryMd = config.directoryMd === true;
+const fullIndexPosition = okfConfig.fullIndexPosition || 'none';
+const fullIndexAbs = fullIndexPosition !== 'none' ? resolveSystemPath(fullIndexPosition) : null;
 
-let fullIndexAbs = null;
-if (fullIndexPosition !== 'none') {
-  fullIndexAbs =
-    fullIndexPosition === 'bundleRoot'
-      ? path.join(bundleRoot, 'fullIndex.md')
-      : resolveSystemPath(fullIndexPosition); // <path> is a system path (absolute or cwd-relative)
-}
-
-// Generated full-index files are never listed as concepts. A `fullIndex.md` at
-// the bundle root is always excluded (even when generation is off, so a stale
-// artifact is never mistaken for a concept); the configured target, if any, too.
-const excludedFiles = new Set([path.resolve(path.join(bundleRoot, 'fullIndex.md'))]);
+// Generated full-index file is never listed as a concept in any bundle.
+const excludedFiles = new Set();
 if (fullIndexAbs) excludedFiles.add(path.resolve(fullIndexAbs));
 
-// Build a link honoring linkFormat.
-//   rootRelative → bundle-relative, starting with "/"
+// Build a link honoring a bundle's linkFormat.
+//   bundleRootRelative → bundle-relative, starting with "/"
 //   fileRelative → relative to baseDir (the dir holding the index being written)
-// isDir appends a trailing slash.
-function linkFor(targetAbs, isDir, baseDir) {
-  let rel;
-  if (linkFormat === 'fileRelative') {
-    rel = toPosix(path.relative(baseDir, targetAbs));
-    if (!rel.startsWith('.')) rel = './' + rel;
-  } else {
-    rel = '/' + toPosix(path.relative(bundleRoot, targetAbs));
+//   absolute → absolute system path
+//   wikilink → [[title]] syntax, using the link title rather than a URL
+// isDir appends a trailing slash (ignored for wikilink).
+function linkFor(bundle, targetAbs, isDir, baseDir) {
+  let target;
+  switch (bundle.linkFormat) {
+    case 'fileRelative':
+      target = toPosix(path.relative(baseDir, targetAbs));
+      if (!target.startsWith('.')) target = `./${target}`;
+      break;
+    case 'absolute':
+      target = toPosix(targetAbs);
+      break;
+    case 'wikilink':
+      target = null; // handled by the caller via bullet()
+      break;
+    default:
+      target = `/${toPosix(path.relative(bundle.bundleRoot, targetAbs))}`;
+      break;
   }
-  if (isDir && !rel.endsWith('/')) rel += '/';
-  return encodeLink(rel);
+  if (target != null && isDir && !target.endsWith('/')) target += '/';
+  return target != null ? encodeLink(target) : null;
 }
 
-// --- entry building --------------------------------------------------------
+// --- entry building ----------------------------------------------------
 
-function conceptEntry(dir, name, baseDir) {
+function conceptEntry(bundle, dir, name, baseDir) {
   const fpath = path.join(dir, name);
   const fm = readFrontmatter(fpath);
   if (fm.type == null || String(fm.type).trim() === '') {
@@ -164,15 +204,15 @@ function conceptEntry(dir, name, baseDir) {
   return {
     title: fm.title != null ? String(fm.title) : name.replace(/\.md$/i, ''),
     description: fm.description != null ? String(fm.description) : '',
-    link: linkFor(fpath, false, baseDir),
+    link: linkFor(bundle, fpath, false, baseDir),
   };
 }
 
-function subdirEntry(dir, name, baseDir) {
-  const link = linkFor(path.join(dir, name), true, baseDir);
+function subdirEntry(bundle, dir, name, baseDir) {
+  const link = linkFor(bundle, path.join(dir, name), true, baseDir);
   // When directory metadata is off, never touch .directory.md; the entry is
   // just the directory name.
-  if (!directoryMd) {
+  if (!bundle.directoryMd) {
     return { title: name, description: '', link, isDir: true };
   }
   // With directoryMd on, every subdirectory must carry a .directory.md.
@@ -180,7 +220,7 @@ function subdirEntry(dir, name, baseDir) {
   if (!fs.existsSync(dpath)) {
     fail(
       `${rel(dpath)} is missing. With "directoryMd": true every subdirectory needs a .directory.md — ` +
-        `add it, or set "directoryMd" to false in okf.config.json.`,
+        `add it, or set "directoryMd" to false for this bundle.`,
     );
   }
   const dm = readFrontmatter(dpath);
@@ -194,56 +234,58 @@ function subdirEntry(dir, name, baseDir) {
 
 const bullet = (e) => {
   const text = e.isDir ? `**${esc(e.title)}/**` : esc(e.title);
-  return `* [${text}](${e.link})` + (e.description ? ` - ${e.description}` : '');
+  if (e.link == null) return `* [[${esc(e.title)}]]${e.description ? ` - ${e.description}` : ''}`;
+  return `* [${text}](${e.link})${e.description ? ` - ${e.description}` : ''}`;
 };
 
-// --- per-directory indices -------------------------------------------------
+// --- per-directory indices ----------------------------------------------
 
 const written = [];
 
-function writeDirIndex(dir) {
+function writeDirIndex(bundle, dir) {
   const { concepts, subdirs } = listDir(dir, excludedFiles);
 
-  const conceptEntries = concepts.map((n) => conceptEntry(dir, n, dir)).sort(byTitle);
-  const subdirEntries = subdirs.map((n) => subdirEntry(dir, n, dir)).sort(byTitle);
+  const conceptEntries = concepts.map((n) => conceptEntry(bundle, dir, n, dir)).sort(byTitle);
+  const subdirEntries = subdirs.map((n) => subdirEntry(bundle, dir, n, dir)).sort(byTitle);
 
   const parts = [];
-  if (conceptEntries.length) parts.push('# Concepts\n\n' + conceptEntries.map(bullet).join('\n'));
-  if (subdirEntries.length) parts.push('# Subdirectories\n\n' + subdirEntries.map(bullet).join('\n'));
+  if (conceptEntries.length) parts.push(`# Concepts\n\n${conceptEntries.map(bullet).join('\n')}`);
+  if (subdirEntries.length) parts.push(`# Subdirectories\n\n${subdirEntries.map(bullet).join('\n')}`);
 
-  const body = parts.length ? parts.join('\n\n') + '\n' : '';
+  const body = parts.length ? `${parts.join('\n\n')}\n` : '';
   const target = path.join(dir, 'index.md');
   fs.writeFileSync(target, body);
   written.push(target);
 
-  for (const name of subdirs) writeDirIndex(path.join(dir, name));
+  for (const name of subdirs) writeDirIndex(bundle, path.join(dir, name));
 }
 
-// --- full index ------------------------------------------------------------
+// --- full index ----------------------------------------------------------
 
-function walkFull(dir, indent, lines, baseDir) {
+function walkFull(bundle, dir, indent, lines, baseDir) {
   const { concepts, subdirs } = listDir(dir, excludedFiles);
   const pad = '    '.repeat(indent);
 
-  for (const e of concepts.map((n) => conceptEntry(dir, n, baseDir)).sort(byTitle)) {
+  for (const e of concepts.map((n) => conceptEntry(bundle, dir, n, baseDir)).sort(byTitle)) {
     lines.push(pad + bullet(e));
   }
   for (const name of subdirs
-    .map((n) => ({ name: n, entry: subdirEntry(dir, n, baseDir) }))
+    .map((n) => ({ name: n, entry: subdirEntry(bundle, dir, n, baseDir) }))
     .sort((a, b) => byTitle(a.entry, b.entry))) {
     lines.push(pad + bullet(name.entry));
-    walkFull(path.join(dir, name.name), indent + 1, lines, baseDir);
+    walkFull(bundle, path.join(dir, name.name), indent + 1, lines, baseDir);
   }
 }
 
 // --- run -------------------------------------------------------------------
 
-writeDirIndex(bundleRoot);
+for (const bundle of bundles) writeDirIndex(bundle, bundle.bundleRoot);
 
 if (fullIndexAbs) {
   const lines = [];
-  walkFull(bundleRoot, 0, lines, path.dirname(fullIndexAbs));
-  const body = '# Full Index\n\n' + lines.join('\n') + (lines.length ? '\n' : '');
+  const baseDir = path.dirname(fullIndexAbs);
+  for (const bundle of bundles) walkFull(bundle, bundle.bundleRoot, 0, lines, baseDir);
+  const body = `# Full Index\n\n${lines.join('\n')}${lines.length ? '\n' : ''}`;
   fs.mkdirSync(path.dirname(fullIndexAbs), { recursive: true });
   fs.writeFileSync(fullIndexAbs, body);
   written.push(fullIndexAbs);

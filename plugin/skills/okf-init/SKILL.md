@@ -10,49 +10,69 @@ skillmancy-version: "0.2.0"
 
 ## Task
 
-Load the `okf-reference` skill first if its model isn't already in context — this skill relies on the `okf.config.json` shape and bundle conventions it defines.
+### 0. Setup
 
-### 1. Check for an existing config
+Load the `okf-reference` skill.
 
-Look for `okf.config.json` at the project root (the working directory, not inside any bundle). If it already exists, ask the user whether to abort, overwrite or move onto step 7. Do not overwrite silently.
+### 0. Setup
 
-### 2. Ask default vs. personalized
+Load `okf-reference`.
 
-Ask the user whether they want a default installation or a personalized one:
+### 1. Read the config
 
-- **Default** — use the default value for every `okf.config.json` property as given in the `okf-reference` skill, asking the user only for the values that reference marks as required with no default (e.g. `bundleRoot`).
-- **Personalized** — walk through each property defined in the `okf-reference` skill's `okf.config.json` table and let the user set it explicitly, offering that property's documented default as the suggested choice.
+Read `okf.config.json` at the project root. Missing → stop, tell the user to run `okf-init`. For each entry in `bundles`, resolve it's configuration. If any is defined, tell the user and stop.
 
-Don't invent answers for required fields with no default; omit optional fields the user has no opinion on rather than writing `null` or empty placeholders.
+### 2. Ask how many bundles, and default vs. personalized
 
-### 3. Write `okf.config.json`
+1. Ask whether the user wants a default installation or a personalized one.
+2. Ask how many bundles this project needs (almost always one, to start). 
+3. For each bundle:
+  1. Ask whether it should be defined inline in `okf.config.json` or as a standalone `bundle.config.json` file referenced by path.
+  2. Define the bundle config:
+    - **Default installation** — `bundleRoot` => ask user, `linkFormat` and `logging` => use defaults.
+    - **Personalized installation** — walk through each property in both schemas and let the user set it explicitly or skip it, offering the schema's `default` as the suggested choice where present.
+  Don't invent answers for required properties with no default. Omit properties not defined.
+4. Determine the full index position (optional).
 
-Write it at the project root with the gathered properties, in the key order shown in the reference skill.
+### 3. Write the config file(s)
 
-### 4. Create the bundle folder
+Write `okf.config.json` and `bundle.config.json` following the schemas and rules defined in `okf-reference`.
 
-Create the `bundleRoot` directory if it doesn't already exist. Do not create an `index.md` or any other file inside it — index generation is handled elsewhere, not by this skill.
+### 4. Create the bundle folder(s)
 
-### 5. Create `log.md` if logging is `file`
+For each bundle, create its `bundleRoot` directory if it doesn't already exist.
+For standalone bundles, this is the directory holding its `bundle.config.json`.
 
-If `logging` was set to `file`, create an empty `log.md` at `bundleRoot`.
+### 5. Create `log.md` where logging is `log.md`
+
+For each bundle whose `logging` is `"log.md"`, create an empty `log.md` at that bundle's `bundleRoot`.
 
 ### 6. Report
 
-Report the `okf.config.json` path and the bundle root path that were created.
+Report the `okf.config.json` path, any standalone `bundle.config.json` paths, and the bundle root path(s) that were created.
 
 ### 7. Document usage for future agents
 
 Check which of `AGENTS.md` / `CLAUDE.md` exist at the project root.
 
-- If neither exists, ask the user (AskUserQuestion) whether to create one and add the snippet below, and which filename to use. Skip this step if they decline.
-- If one exists, ask (AskUserQuestion) whether to append the snippet to it. Skip if they decline.
-- If both exist, ask (AskUserQuestion, multi-select) which file(s) to append to — either, both, or skip.
+- If neither exists, ask the user:
+  1. Create `AGENTS.md` and add the snippet 
+  2. Create `CLAUDE.md` and add the snippet
+  3. Skip
+- If one exists, ask:
+  1. Add the snippet to that one
+  2. Create the other one and add the snippet to it
+  3. Skip
+- If both exist, ask:
+  1. Add the snippet to `AGENTS.md` 
+  2. Add the snippet to `CLAUDE.md`
+  3. Skip
 
-If not already present, append the following template as-is at the end of the chosen file(s), verbatim:
+If the snippet is already present, skip this step.
 
+**Snippet**:
 ```markdown
 ## Project knowledge
 
-This project maintains an OKF knowledge bundle — check `bundleRoot` in `okf.config.json` for its location. At the start of a session, read `<bundleRoot>/fullIndex.md` if present, otherwise `<bundleRoot>/index.md`, for an overview of the project's documentation.
+This project maintains one or more OKF knowledge bundles — check `bundles` in `okf.config.json` for their locations (each entry is either inline or a path to a standalone `bundle.config.json`). At the start of a session, read `fullIndex.md` at `fullIndexPosition` if configured, otherwise each bundle's `<bundleRoot>/index.md`, for an overview of the project's documentation.
 ```
