@@ -1,0 +1,47 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "bundle.config.schema.json",
+	"title": "OKF bundle configuration",
+	"description": "Configuration for a single OKF knowledge bundle. Used either in okf.config.json or in bundle.config.json.",
+	"type": "object",
+	"required": ["linkFormat", "logging"],
+	"$defs": {
+		"systemPath": {
+			"type": "string",
+			"pattern": "^(?:[A-Za-z]:)?[\\\\/]{0,2}(?:[^\\\\/:*?\"<>|\\r\\n]+[\\\\/]?)+$",
+			"description": "A system path. It can be absolute, or relative to the config file. Accepts both Windows and POSIX path syntax."
+		}
+	},
+	"properties": {
+		"name": {
+			"type": "string",
+			"pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+			"description": "Optional kebab-case name used to address this bundle, e.g. in CLI arguments or when asking the user to disambiguate between multiple configured bundles."
+		},
+		"directoryMd": {
+			"type": "boolean",
+			"description": "Whether .directory.md directory-property files are used."
+		},
+		"linkFormat": {
+			"type": "string",
+			"description": "Default link format used in the bundle. Used during writing and linting.",
+			"enum": ["bundleRootRelative", "fileRelative", "absolute", "wikilink"],
+			"default": "fileRelative"
+		},
+		"logging": {
+			"type": "string",
+			"description": "How changes are recorded: log.md -> maintain log.md; git -> rely on git history; none -> no change log.",
+			"enum": ["log.md", "git", "none"],
+			"default": "log.md"
+		},
+		"maxBundleDepth": {
+			"type": "number",
+			"description": "Maximum directory nesting depth allowed within a bundle, measured from bundleRoot (depth 0)."
+		},
+		"requiredProperties": {
+			"type": "array",
+			"description": "Frontmatter properties every concept must carry. 'type' is always required by OKF and is ignored if listed here.",
+			"items": { "type": "string" }
+		}
+	}
+}

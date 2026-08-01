@@ -1,0 +1,57 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "okf.config.schema.json",
+	"title": "Schema for okf.config.json",
+	"description": "Okf-wiki local configuration for agents operating on one or more OKF knowledge bundles. Lives at the project root.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["bundles"],
+	"$defs": {
+		"systemPath": {
+			"type": "string",
+			"pattern": "^(?:[A-Za-z]:)?[\\\\/]{0,2}(?:[^\\\\/:*?\"<>|\\r\\n]+[\\\\/]?)+$",
+			"description": "A system path. It can be absolute, or relative to the config file. Accepts both Windows and POSIX path syntax."
+		}
+	},
+	"properties": {
+		"$schema": {
+			"type": "string",
+			"description": "Optional JSON Schema reference for editor tooling."
+		},
+		"fullIndexPosition": {
+			"description": "Where the recursive full index is written.",
+			"default": "none",
+			"oneOf": [
+				{ "const": "none" },
+				{
+					"$ref": "#/$defs/systemPath",
+					"not": { "const": "none" }
+				}
+			]
+		},
+		"bundles": {
+			"type": "array",
+			"description": "The knowledge bundles configured for this project.",
+			"items": {
+				"oneOf": [
+					{
+						"$ref": "#/$defs/systemPath",
+						"description": "Path to a standalone bundle.config.schema.json-shaped file holding this bundle's configuration."
+					},
+					{
+						"type": "object",
+						"$ref": "bundle.config.schema.json",
+						"unevaluatedProperties": false,
+						"properties": {
+							"bundleRoot": {
+								"$ref": "#/$defs/systemPath",
+								"description": "Location of the knowledge bundle."
+							}
+						},
+						"required": ["bundleRoot"]
+					}
+				]
+			}
+		}
+	}
+}
